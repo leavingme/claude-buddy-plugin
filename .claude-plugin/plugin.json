@@ -1,0 +1,40 @@
+{
+  "name": "claude-buddy",
+  "version": "0.1.0",
+  "description": "把 Claude Code 的权限审批和会话状态通过 BLE 转给硬件设备（小智 ESP32 或其他兼容 Claude Desktop Hardware Buddy 协议的设备）。按 BOOT 批准，按音量键拒绝。",
+  "author": {
+    "name": "leavingme",
+    "email": ""
+  },
+  "repository": "https://github.com/leavingme/claude-buddy-plugin",
+  "license": "MIT",
+  "keywords": [
+    "ble",
+    "hardware",
+    "buddy",
+    "xiaozhi",
+    "esp32",
+    "permission",
+    "bluetooth"
+  ],
+  "userConfig": {
+    "device_prefix": {
+      "type": "string",
+      "title": "BLE device name prefix",
+      "description": "Prefix of the BLE advertising name to connect to. Xiaozhi 固件默认广播 'Claude-XXXX'。",
+      "default": "Claude-"
+    },
+    "owner_name": {
+      "type": "string",
+      "title": "Owner name",
+      "description": "显示在硬件 INFO 页的 owner 字段（对齐 Claude Desktop 行为）。默认用 $USER。",
+      "default": ""
+    },
+    "skip_tools": {
+      "type": "string",
+      "title": "Auto-allow tools",
+      "description": "逗号分隔的工具名列表，这些工具不走 BLE 审批直接放行。避免审批疲劳。",
+      "default": "Read,Glob,Grep,TodoWrite,TaskList,TaskGet,TaskUpdate,TaskCreate,WebFetch,WebSearch,LSP"
+    }
+  }
+}

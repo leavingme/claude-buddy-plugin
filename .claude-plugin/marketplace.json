@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-buddy",
+  "description": "Local xiaozhi buddy plugin",
+  "owner": {
+    "name": "leavingme"
+  },
+  "plugins": [
+    {
+      "name": "claude-buddy",
+      "description": "BLE hardware buddy bridge for xiaozhi ESP32",
+      "source": "./"
+    }
+  ]
+}

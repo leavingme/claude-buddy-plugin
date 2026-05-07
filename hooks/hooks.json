@@ -1,0 +1,99 @@
+{
+  "_comment": "Plugin hooks for claude-buddy. 前置 PATH 保证 uv (装在 ~/.local/bin) 能被找到。`uv run` 读 PEP 723 元数据自动装 bleak 到隔离 venv。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_preuse.py",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" CLAUDE_BUDDY_DEVICE_PREFIX=\"Claude-\" CLAUDE_BUDDY_OWNER=\"leavingme\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/spawn_daemon.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" CLAUDE_BUDDY_DEVICE_PREFIX=\"Claude-\" CLAUDE_BUDDY_OWNER=\"leavingme\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/spawn_daemon.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_sessionend.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

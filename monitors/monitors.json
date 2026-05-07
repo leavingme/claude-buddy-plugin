@@ -1,0 +1,7 @@
+[
+  {
+    "name": "claude-buddy-bridge",
+    "command": "uv run --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/buddy_bridge.py --device-prefix '${user_config.device_prefix}' --owner '${user_config.owner_name}' 2>&1",
+    "description": "BLE bridge: forwards Claude Code permission prompts and session state to xiaozhi hardware over Nordic UART Service."
+  }
+]
