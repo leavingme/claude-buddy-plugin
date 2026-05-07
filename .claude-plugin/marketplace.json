@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "claude-buddy",
+  "name": "leavingme",
   "description": "Local xiaozhi buddy plugin",
   "owner": {
     "name": "leavingme"
