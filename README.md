@@ -1,5 +1,7 @@
 # Claude Buddy Plugin
 
+Claude Code 插件，用于连接 Claude Buddy，支持 Claude Desktop App 和 Claude Code。
+
 ## 安装
 
 ```

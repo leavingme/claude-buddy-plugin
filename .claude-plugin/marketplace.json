@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "leavingme",
-  "description": "Local Claude Buddy plugin",
+  "description": "Claude Code plugin for connecting to Claude Buddy, supports Claude Desktop app and Claude Code",
   "owner": {
     "name": "leavingme"
   },
   "plugins": [
     {
       "name": "claude-buddy",
-      "description": "BLE hardware buddy bridge for Claude Buddy ESP32",
+      "description": "BLE hardware bridge connecting Claude Code to Claude Buddy device",
       "source": "./"
     }
   ]
