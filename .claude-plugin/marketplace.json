@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "leavingme",
-  "description": "Local xiaozhi buddy plugin",
+  "description": "Local Claude Buddy plugin",
   "owner": {
     "name": "leavingme"
   },
   "plugins": [
     {
       "name": "claude-buddy",
-      "description": "BLE hardware buddy bridge for xiaozhi ESP32",
+      "description": "BLE hardware buddy bridge for Claude Buddy ESP32",
       "source": "./"
     }
   ]
