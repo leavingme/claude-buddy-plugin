@@ -292,7 +292,7 @@ class Bridge:
             )
             decision = "ask"
             sess.waiting = False
-            self._write_and_close(writer, decision, reason="ble_not_connected")
+            self._write_and_close(writer, decision)
             return
 
         # 构造 hint（短摘要，适合小屏显示）
@@ -329,13 +329,10 @@ class Bridge:
         self._write_and_close(writer, decision)
 
     def _write_and_close(
-        self, writer: asyncio.StreamWriter, decision: str, reason: str = ""
+        self, writer: asyncio.StreamWriter, decision: str
     ) -> None:
         try:
-            msg = {"decision": decision}
-            if reason:
-                msg["reason"] = reason
-            writer.write((json.dumps(msg) + "\n").encode())
+            writer.write((json.dumps({"decision": decision}) + "\n").encode())
         except Exception as e:
             logging.warning("writeback to hook failed: %s", e)
         writer.close()

@@ -34,14 +34,13 @@ TIMEOUT_SEC = 540
 BUDDY_DISABLED_DIR = Path.home() / ".claude-buddy" / "disabled"
 
 
-def _emit(behavior: str, reason: str = "") -> None:
+def _emit(behavior: str) -> None:
     """输出 PermissionRequest 格式的决策。
 
     behavior: "allow" | "deny" | "ask"
     - allow: 直接放行，不弹审批框
     - deny: 拒绝操作
     - ask: 走 Claude Code 默认审批流程
-    - notify_system: 是否注入 systemMessage（BLE 断开等需要告知用户的情况）
     """
     out = {
         "hookSpecificOutput": {
@@ -51,11 +50,6 @@ def _emit(behavior: str, reason: str = "") -> None:
             }
         }
     }
-    if reason:
-        out["hookSpecificOutput"]["decision"]["reason"] = reason
-    # 降级为 ask 时注入 systemMessage，让用户在对话里看到原因
-    if behavior == "ask" and reason:
-        out["systemMessage"] = f"[Buddy] {reason}，已切换为默认审批"
     print(json.dumps(out), flush=True)
 
 
@@ -64,7 +58,7 @@ def main() -> int:
     try:
         ev = json.loads(raw)
     except Exception:
-        _emit("ask", "hook: bad stdin JSON")
+        _emit("ask")
         return 0
 
     sid = ev.get("session_id") or "default"
@@ -76,14 +70,14 @@ def main() -> int:
     # Auto-accept 模式下不走 BLE 审批，直接放行
     # acceptEdits / bypassPermissions / auto 都属于自动放行
     if permission_mode in ("acceptEdits", "bypassPermissions", "auto"):
-        _emit("allow", f"auto-accept mode ({permission_mode})")
+        _emit("allow")
         return 0
 
     # per-project 禁用检查：cwd 对应的项目是否被禁用 Buddy
     if cwd:
         project_name = Path(cwd).name
         if (BUDDY_DISABLED_DIR / project_name).exists():
-            _emit("ask", f"Buddy disabled for project '{project_name}'")
+            _emit("ask")
             return 0
 
     req_id = f"{sid[:6]}-{uuid.uuid4().hex[:8]}"
@@ -103,7 +97,7 @@ def main() -> int:
         sock.settimeout(5)
         sock.connect(SOCK_PATH)
     except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
-        _emit("ask", f"buddy bridge unavailable: {e}")
+        _emit("ask")
         return 0
 
     try:
@@ -120,25 +114,21 @@ def main() -> int:
             if b"\n" in buf:
                 break
         if b"\n" not in buf:
-            _emit("ask", "buddy timeout")
+            _emit("ask")
             return 0
         line = buf.split(b"\n", 1)[0]
         resp = json.loads(line.decode("utf-8"))
         decision = resp.get("decision", "ask")
-        reason = resp.get("reason", "")
         # 只接受 allow/deny，ask 及以上默认值都降级为 ask
         if decision not in ("allow", "deny"):
             decision = "ask"
-        if reason == "ble_not_connected":
-            _emit(decision, "BLE 未连接")
-        else:
-            _emit(decision, f"buddy: {decision} via BLE")
+        _emit(decision)
         return 0
     except socket.timeout:
-        _emit("ask", "buddy socket timeout")
+        _emit("ask")
         return 0
     except Exception as e:
-        _emit("ask", f"buddy error: {e}")
+        _emit("ask")
         return 0
     finally:
         try:
