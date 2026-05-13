@@ -60,5 +60,5 @@ After running, tell the user:
 - Whether the daemon is up (socket exists + process running)
 - Whether BLE is connected
 - Whether Buddy is enabled or disabled for the current project
-- If Buddy is disabled, mention they can run `/buddy on` to re-enable
-- If something looks wrong, suggest `/buddy restart`
+- If Buddy is disabled, mention they can run `/claude-buddy:on` to re-enable
+- If something looks wrong, suggest `/claude-buddy:restart`

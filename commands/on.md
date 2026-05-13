@@ -1,5 +1,5 @@
 ---
-description: Enable Buddy hardware approval for the current project.
+description: Enable Buddy hardware approval for current project
 allowed-tools: Bash
 ---
 

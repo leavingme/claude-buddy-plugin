@@ -1,5 +1,5 @@
 ---
-description: Disable Buddy hardware approval for the current project. When disabled, permission requests fall back to Claude's default approval dialog instead of going through the Buddy device.
+description: Disable Buddy hardware approval for current project
 allowed-tools: Bash
 ---
 
