@@ -96,26 +96,39 @@ class Bridge:
     #   Claude Code SessionStart hook touch 它；SessionEnd hook 删它。
     #   daemon 每秒扫，空目录超过 EXIT_GRACE_SEC 就自己优雅退出。
 
-    async def session_sentinel(self, dir_path: Path, grace_sec: int) -> None:
-        """若 session 引用计数长时间为零就退出。"""
-        empty_since: float | None = None
+    async def process_sentinel(self, pids_dir: Path, grace_sec: int) -> None:
+        """检查记录的 Claude Code PID 是否还活着，全死了就退出。"""
+        stale_since: float | None = None
         while not self.stop_event.is_set():
             try:
-                live = [p for p in dir_path.iterdir() if p.is_file()]
+                pids = [int(p.name) for p in pids_dir.iterdir() if p.is_file()]
             except FileNotFoundError:
-                live = []
-            if not live:
-                if empty_since is None:
-                    empty_since = time.time()
-                elif time.time() - empty_since >= grace_sec:
+                pids = []
+
+            # 检查哪些 PID 还活着
+            alive = [pid for pid in pids if self._pid_exists(pid)]
+
+            if pids and not alive:  # 有记录但全死了
+                if stale_since is None:
+                    stale_since = time.time()
+                elif time.time() - stale_since >= grace_sec:
                     logging.info(
-                        "no active Claude Code sessions for %ds, exiting", grace_sec
+                        "all Claude Code PIDs dead for %ds, exiting", grace_sec
                     )
                     self.stop_event.set()
                     break
             else:
-                empty_since = None
+                stale_since = None
             await asyncio.sleep(1)
+
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        """检查 PID 是否存在（进程还活着）。"""
+        try:
+            os.kill(pid, 0)  # 不发信号，只检查
+            return True
+        except OSError:
+            return False
 
     # ------------------------------------------------------------------
     # 快照构造（对齐 REFERENCE.md heartbeat snapshot）
@@ -771,19 +784,19 @@ async def amain(args) -> int:
 
     # 信号
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         loop.add_signal_handler(sig, bridge.stop_event.set)
 
     server = await bridge.start_socket_server()
     ble_task = asyncio.create_task(bridge.ble_loop())
 
-    # Session 引用计数：空 > grace 秒就自己退出
-    sessions_dir = Path(args.sessions_dir)
-    sessions_dir.mkdir(parents=True, exist_ok=True)
+    # PID 检测：所有记录的 Claude Code PID 死了 > grace 秒就退出
+    pids_dir = Path(args.pids_dir)
+    pids_dir.mkdir(parents=True, exist_ok=True)
     sentinel_task: asyncio.Task | None = None
     if args.exit_on_idle > 0:
         sentinel_task = asyncio.create_task(
-            bridge.session_sentinel(sessions_dir, args.exit_on_idle)
+            bridge.process_sentinel(pids_dir, args.exit_on_idle)
         )
 
     try:
@@ -827,10 +840,15 @@ def main() -> int:
         help="活跃 Claude Code session 标记目录；每文件=一个活 session",
     )
     p.add_argument(
+        "--pids-dir",
+        default="/tmp/claude-buddy-pids",
+        help="Claude Code PID 记录目录；每文件=一个 Claude Code 进程",
+    )
+    p.add_argument(
         "--exit-on-idle",
         type=int,
         default=5,
-        help="session 目录空此秒数后自动退出；0=永不（纯 daemon 模式）",
+        help="所有 PID 都死了此秒数后自动退出；0=永不（纯 daemon 模式）",
     )
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()

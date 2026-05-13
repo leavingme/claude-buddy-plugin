@@ -30,7 +30,7 @@ from pathlib import Path
 SOCK = os.environ.get("CLAUDE_BUDDY_SOCK", "/tmp/claude-buddy-bridge.sock")
 SPAWN_LOG = Path("/tmp/claude-buddy-spawn.log")
 DAEMON_LOG = Path("/tmp/claude-buddy-bridge.log")
-SESSIONS_DIR = Path("/tmp/claude-buddy-sessions")
+PIDS_DIR = Path("/tmp/claude-buddy-pids")
 
 
 def _log(msg: str) -> None:
@@ -41,13 +41,15 @@ def _log(msg: str) -> None:
         pass
 
 
-def mark_session_alive(session_id: str) -> None:
-    """创建 /tmp/claude-buddy-sessions/<sid> 文件，daemon 据此判断活跃性。"""
+def mark_claude_code_alive() -> None:
+    """记录 Claude Code 父进程 PID。"""
+    claude_pid = os.getppid()
     try:
-        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        (SESSIONS_DIR / session_id).touch()
+        PIDS_DIR.mkdir(parents=True, exist_ok=True)
+        (PIDS_DIR / str(claude_pid)).touch()
+        _log(f"recorded claude pid={claude_pid}")
     except Exception as e:
-        _log(f"mark_session_alive({session_id}) failed: {e}")
+        _log(f"mark_claude_code_alive({claude_pid}) failed: {e}")
 
 
 def daemon_alive() -> bool:
@@ -135,8 +137,7 @@ def main() -> int:
         session_id = ""
 
     _log(f"invoked session_id={session_id!r}")
-    if session_id:
-        mark_session_alive(session_id)
+    mark_claude_code_alive()
 
     if daemon_alive():
         _log("daemon already alive, skipping")
