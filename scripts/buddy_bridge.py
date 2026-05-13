@@ -174,8 +174,8 @@ class Bridge:
         sid = payload.get("session_id") or "default"
 
         if kind == "permission_request":
-            await self._on_preuse(payload, writer)
-            return  # writer 已被 _on_preuse 接管
+            await self._on_permission_request(payload, writer)
+            return  # writer 已被 _on_permission_request 接管
         elif kind == "event":
             self._on_generic_event(payload)
         elif kind == "ping":
@@ -263,7 +263,7 @@ class Bridge:
         writer.close()
         self.dirty.set()
 
-    async def _on_preuse(
+    async def _on_permission_request(
         self, payload: dict, writer: asyncio.StreamWriter
     ) -> None:
         sid = payload["session_id"]
@@ -292,7 +292,7 @@ class Bridge:
             )
             decision = "ask"
             sess.waiting = False
-            self._write_and_close(writer, decision)
+            self._write_and_close(writer, decision, reason="ble_not_connected")
             return
 
         # 构造 hint（短摘要，适合小屏显示）
@@ -329,10 +329,13 @@ class Bridge:
         self._write_and_close(writer, decision)
 
     def _write_and_close(
-        self, writer: asyncio.StreamWriter, decision: str
+        self, writer: asyncio.StreamWriter, decision: str, reason: str = ""
     ) -> None:
         try:
-            writer.write((json.dumps({"decision": decision}) + "\n").encode())
+            msg = {"decision": decision}
+            if reason:
+                msg["reason"] = reason
+            writer.write((json.dumps(msg) + "\n").encode())
         except Exception as e:
             logging.warning("writeback to hook failed: %s", e)
         writer.close()

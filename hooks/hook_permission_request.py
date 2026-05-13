@@ -125,10 +125,14 @@ def main() -> int:
         line = buf.split(b"\n", 1)[0]
         resp = json.loads(line.decode("utf-8"))
         decision = resp.get("decision", "ask")
+        reason = resp.get("reason", "")
         # 只接受 allow/deny，ask 及以上默认值都降级为 ask
         if decision not in ("allow", "deny"):
             decision = "ask"
-        _emit(decision, f"buddy: {decision} via BLE")
+        if reason == "ble_not_connected":
+            _emit(decision, "BLE 未连接")
+        else:
+            _emit(decision, f"buddy: {decision} via BLE")
         return 0
     except socket.timeout:
         _emit("ask", "buddy socket timeout")
