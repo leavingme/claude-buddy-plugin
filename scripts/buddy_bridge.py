@@ -793,6 +793,15 @@ async def amain(args) -> int:
     # PID 检测：所有记录的 Claude Code PID 死了 > grace 秒就退出
     pids_dir = Path(args.pids_dir)
     pids_dir.mkdir(parents=True, exist_ok=True)
+    # 启动时清理已死的 PID 文件（避免残留导致 immediately exit）
+    for pid_file in pids_dir.iterdir():
+        try:
+            pid = int(pid_file.name)
+            if not Bridge._pid_exists(pid):
+                pid_file.unlink()
+                logging.debug("cleaned up stale PID file: %s", pid)
+        except (ValueError, OSError):
+            pass
     sentinel_task: asyncio.Task | None = None
     if args.exit_on_idle > 0:
         sentinel_task = asyncio.create_task(
