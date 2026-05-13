@@ -1,7 +1,7 @@
 {
   "name": "claude-buddy",
   "version": "0.1.0",
-  "description": "把 Claude Code 的权限审批和会话状态通过 BLE 转给硬件设备（小智 ESP32 或其他兼容 Claude Desktop Hardware Buddy 协议的设备）。按 BOOT 批准，按音量键拒绝。",
+  "description": "把 Claude Code 的权限审批和会话状态通过 BLE 转给硬件设备（小智 ESP32 或其他兼容 Claude Desktop Hardware Buddy 协议的设备）。使用 PermissionRequest hook，只在真正需要审批时通知 Buddy。按 BOOT 批准，按音量键拒绝。",
   "author": {
     "name": "leavingme",
     "email": ""

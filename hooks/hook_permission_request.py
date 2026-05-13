@@ -3,16 +3,16 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""Claude Code PreToolUse hook - 阻塞等小智审批。
+"""Claude Code PermissionRequest hook - 阻塞等 Buddy 硬件审批。
 
 stdin: hook 事件 JSON (Claude Code 注入)
-stdout: {"hookSpecificOutput": {"permissionDecision": "allow"|"deny"|"ask"}}
+stdout: {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"|"deny"}}}
 
 流程：
-1) 读 stdin hook payload
-2) 通过 Unix socket 发 preuse_start 给 bridge daemon
-3) 阻塞等 daemon 回决策（bridge 侧等小智 BLE 回执，内部超时 540s）
-4) 若 daemon 连不上 / 超时，返回 "ask"（走 Claude Code 默认权限流程）
+1) 读 stdin hook payload（PermissionRequest 只在需要弹审批框时触发）
+2) 通过 Unix socket 发 permission_request 给 bridge daemon
+3) 阻塞等 daemon 回决策（bridge 侧判断 BLE 未连则立即返回 ask，已连则等 Buddy 回执，最多 540s）
+4) 若 daemon 连不上 / 超时，返回 behavior: "ask"（走 Claude Code 默认审批流程）
 """
 
 from __future__ import annotations
@@ -23,23 +23,39 @@ import socket
 import sys
 import time
 import uuid
+from pathlib import Path
 
 SOCK_PATH = os.environ.get(
     "CLAUDE_BUDDY_SOCK", "/tmp/claude-buddy-bridge.sock"
 )
 # Claude Code hook 默认 600s，留 60s 余量
 TIMEOUT_SEC = 540
+# per-project Buddy 禁用标记目录
+BUDDY_DISABLED_DIR = Path.home() / ".claude-buddy" / "disabled"
 
 
-def _emit(decision: str, reason: str = "") -> None:
+def _emit(behavior: str, reason: str = "") -> None:
+    """输出 PermissionRequest 格式的决策。
+
+    behavior: "allow" | "deny" | "ask"
+    - allow: 直接放行，不弹审批框
+    - deny: 拒绝操作
+    - ask: 走 Claude Code 默认审批流程
+    - notify_system: 是否注入 systemMessage（BLE 断开等需要告知用户的情况）
+    """
     out = {
         "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision,
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": behavior,
+            }
         }
     }
     if reason:
-        out["hookSpecificOutput"]["permissionDecisionReason"] = reason
+        out["hookSpecificOutput"]["decision"]["reason"] = reason
+    # 降级为 ask 时注入 systemMessage，让用户在对话里看到原因
+    if behavior == "ask" and reason:
+        out["systemMessage"] = f"[Buddy] {reason}，已切换为默认审批"
     print(json.dumps(out), flush=True)
 
 
@@ -63,16 +79,17 @@ def main() -> int:
         _emit("allow", f"auto-accept mode ({permission_mode})")
         return 0
 
-    # 跳过低危工具（避免审批疲劳）
-    skip = os.environ.get("CLAUDE_BUDDY_SKIP_TOOLS", "Read,Glob,Grep,TodoWrite,TaskList,TaskGet,TaskUpdate,TaskCreate,WebFetch,WebSearch,LSP").split(",")
-    if tool.strip() in [s.strip() for s in skip if s.strip()]:
-        _emit("allow", f"auto-allow low-risk tool {tool}")
-        return 0
+    # per-project 禁用检查：cwd 对应的项目是否被禁用 Buddy
+    if cwd:
+        project_name = Path(cwd).name
+        if (BUDDY_DISABLED_DIR / project_name).exists():
+            _emit("ask", f"Buddy disabled for project '{project_name}'")
+            return 0
 
     req_id = f"{sid[:6]}-{uuid.uuid4().hex[:8]}"
 
     payload = {
-        "kind": "preuse_start",
+        "kind": "permission_request",
         "session_id": sid,
         "req_id": req_id,
         "tool_name": tool,
@@ -86,13 +103,12 @@ def main() -> int:
         sock.settimeout(5)
         sock.connect(SOCK_PATH)
     except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
-        # daemon 没跑：降级为 ask（让 Claude Code 弹默认审批框）
         _emit("ask", f"buddy bridge unavailable: {e}")
         return 0
 
     try:
         sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        # 现在等 daemon 回决策
+        # 等 daemon 回决策
         sock.settimeout(TIMEOUT_SEC)
         buf = b""
         deadline = time.time() + TIMEOUT_SEC
@@ -109,7 +125,8 @@ def main() -> int:
         line = buf.split(b"\n", 1)[0]
         resp = json.loads(line.decode("utf-8"))
         decision = resp.get("decision", "ask")
-        if decision not in ("allow", "deny", "ask"):
+        # 只接受 allow/deny，ask 及以上默认值都降级为 ask
+        if decision not in ("allow", "deny"):
             decision = "ask"
         _emit(decision, f"buddy: {decision} via BLE")
         return 0

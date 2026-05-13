@@ -1,13 +1,13 @@
 {
   "_comment": "Plugin hooks for claude-buddy. 前置 PATH 保证 uv (装在 ~/.local/bin) 能被找到。`uv run` 读 PEP 723 元数据自动装 bleak 到隔离 venv。",
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_preuse.py",
+            "command": "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" uv run --quiet ${CLAUDE_PLUGIN_ROOT}/hooks/hook_permission_request.py",
             "timeout": 600
           }
         ]

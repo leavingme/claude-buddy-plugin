@@ -166,20 +166,31 @@ class Bridge:
         """处理来自 hook 脚本的 JSON 消息。
 
         payload 由 hook 脚本构造，形如：
-          {"kind":"preuse_start", "session_id": "...", "req_id":"...",
+          {"kind":"permission_request", "session_id": "...", "req_id":"...",
            "tool_name":"Bash", "tool_input":{...}, "cwd":"..."}
           {"kind":"event", "session_id":"...", "hook_event_name":"Stop", ...}
         """
         kind = payload.get("kind")
         sid = payload.get("session_id") or "default"
 
-        if kind == "preuse_start":
+        if kind == "permission_request":
             await self._on_preuse(payload, writer)
             return  # writer 已被 _on_preuse 接管
         elif kind == "event":
             self._on_generic_event(payload)
         elif kind == "ping":
-            pass
+            ble_connected = (
+                self.ble_client is not None and self.ble_client.is_connected
+            )
+            try:
+                writer.write(
+                    (json.dumps({"ack": True, "ble_connected": ble_connected}) + "\n").encode()
+                )
+                await writer.drain()
+            except Exception:
+                pass
+            writer.close()
+            return
         elif kind == "fake_ble":
             # 调试通道：直接分发一条模拟的 BLE 消息到 _handle_ble_msg
             self._handle_ble_msg(payload.get("payload") or {})
@@ -223,6 +234,23 @@ class Bridge:
                 pass
             writer.close()
             return
+        elif kind == "ble_status":
+            ble_connected = (
+                self.ble_client is not None and self.ble_client.is_connected
+            )
+            try:
+                writer.write(
+                    (json.dumps({
+                        "ack": True,
+                        "ble_connected": ble_connected,
+                        "pending": sum(len(s.pending) for s in self.sessions.values()),
+                    }) + "\n").encode()
+                )
+                await writer.drain()
+            except Exception:
+                pass
+            writer.close()
+            return
         else:
             logging.warning("unknown hook kind: %r", kind)
 
@@ -250,6 +278,22 @@ class Bridge:
         sess.current_tool = tool_name
         sess.current_input = tool_input
         sess.last_activity = time.time()
+
+        # 如果 Buddy 未连接，立即降级为 ask，不卡住等待
+        ble_connected = (
+            self.ble_client is not None and self.ble_client.is_connected
+        )
+        if not ble_connected:
+            logging.info(
+                "session=%s req=%s tool=%s: Buddy not connected, fallback=ask",
+                sid,
+                req_id,
+                tool_name,
+            )
+            decision = "ask"
+            sess.waiting = False
+            self._write_and_close(writer, decision)
+            return
 
         # 构造 hint（短摘要，适合小屏显示）
         hint = _summarize_tool_input(tool_name, tool_input)
@@ -282,9 +326,13 @@ class Bridge:
         self.dirty.set()
 
         # 把决策写给 hook 脚本
+        self._write_and_close(writer, decision)
+
+    def _write_and_close(
+        self, writer: asyncio.StreamWriter, decision: str
+    ) -> None:
         try:
             writer.write((json.dumps({"decision": decision}) + "\n").encode())
-            await writer.drain()
         except Exception as e:
             logging.warning("writeback to hook failed: %s", e)
         writer.close()
@@ -416,6 +464,23 @@ class Bridge:
     # ------------------------------------------------------------------
     # BLE client
 
+    # ------------------------------------------------------------------
+    # 工具
+
+    def _resolve_all_pending_ask(self, reason: str) -> None:
+        """所有 pending 的 Future 都 resolve 为 ask，用于 BLE 断开时。"""
+        for sess in self.sessions.values():
+            for req_id, fut in list(sess.pending.items()):
+                if not fut.done():
+                    fut.set_result("ask")
+                    logging.info(
+                        "resolved pending req=%s due to %s", req_id, reason
+                    )
+        self.dirty.set()
+
+    # ------------------------------------------------------------------
+    # BLE client
+
     async def ble_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
@@ -434,9 +499,14 @@ class Bridge:
                     await self._ble_send({"time": [now, tz]})
                     logging.info("BLE connected, owner=%s sent", self.owner)
                     await self._ble_serve(client)
+                # _ble_serve 返回后，async with 已保证 client 断开
+                # 此时如果还有 pending 的 future，说明断开了没来得及处理
+                self.ble_client = None
+                self._resolve_all_pending_ask("ble_disconnect")
             except Exception as e:
                 logging.warning("BLE loop error: %s", e)
                 self.ble_client = None
+                self._resolve_all_pending_ask("ble_disconnect")
                 await asyncio.sleep(2)
 
     async def _scan_device(self) -> Optional[BLEDevice]:

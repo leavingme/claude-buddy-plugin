@@ -1,14 +1,14 @@
 ---
-description: Send a fake permission request to the xiaozhi hardware (to test BLE approval path without running a real tool).
+description: Send a fake permission request to the xiaozhi hardware (to test BLE approval path without running a real tool). Uses PermissionRequest hook.
 allowed-tools: Bash
 argument-hint: "[tool-name] [hint-text]"
 ---
 
-Inject a fake PreToolUse prompt into the bridge so the xiaozhi hardware shows an ATTENTION panel. Useful for verifying the BLE link without waiting for Claude to actually try a risky tool.
+Inject a fake PermissionRequest into the bridge so the xiaozhi hardware shows an ATTENTION panel. Useful for verifying the BLE link without waiting for Claude to actually try a risky tool.
 
 Default: tool=Bash, hint="/buddy:test manual check"
 
-Run this script (synthesize a `preuse_start` event and wait for the device's decision):
+Run this script (synthesize a `permission_request` event and wait for the device's decision):
 
 ```bash
 python3 - <<'PY'
@@ -17,7 +17,7 @@ sock = "/tmp/claude-buddy-bridge.sock"
 tool = "$1" if "$1" else "Bash"
 hint = "$2" if "$2" else "/buddy:test manual check"
 req = {
-    "kind": "preuse_start",
+    "kind": "permission_request",
     "session_id": "cmd-test",
     "req_id": f"test-{uuid.uuid4().hex[:8]}",
     "tool_name": tool,
