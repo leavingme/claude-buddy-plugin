@@ -30,7 +30,6 @@ from pathlib import Path
 SOCK = os.environ.get("CLAUDE_BUDDY_SOCK", "/tmp/claude-buddy-bridge.sock")
 SPAWN_LOG = Path("/tmp/claude-buddy-spawn.log")
 DAEMON_LOG = Path("/tmp/claude-buddy-bridge.log")
-PIDS_DIR = Path("/tmp/claude-buddy-pids")
 
 
 def _log(msg: str) -> None:
@@ -41,15 +40,62 @@ def _log(msg: str) -> None:
         pass
 
 
-def mark_claude_code_alive() -> None:
-    """记录 Claude Code 父进程 PID。"""
-    claude_pid = os.getppid()
+def find_claude_pid_via_ppid_chain() -> int | None:
+    """从 hook 的 PPID 开始，沿着父进程链找到 claude 进程 PID。
+
+    os.getppid() 在 hook 里返回的是中间进程，不可靠。
+    """
+    pid = os.getppid()
+    visited: set[int] = set()
+    while pid and pid not in visited:
+        visited.add(pid)
+        try:
+            out = subprocess.check_output(
+                ["ps", "-o", "pid,ppid,comm", "-p", str(pid)],
+                stderr=subprocess.DEVNULL, text=True
+            )
+            lines = out.strip().split("\n")
+            if len(lines) < 2:
+                break
+            parts = lines[1].split()
+            cur_pid = int(parts[0])
+            ppid = int(parts[1])
+            comm = parts[2] if len(parts) > 2 else ""
+            if "claude" in comm:
+                return cur_pid
+            pid = ppid
+        except Exception:
+            break
+    return None
+
+
+def find_claude_pid() -> int:
+    """找到当前 hook 对应的 Claude Code PID。"""
+    claude_pid = find_claude_pid_via_ppid_chain()
+    if claude_pid is None:
+        claude_pid = os.getppid()
+    return claude_pid
+
+
+def register_claude_pid(claude_pid: int) -> bool:
+    """把 Claude Code PID 注册给已经运行的 daemon。"""
     try:
-        PIDS_DIR.mkdir(parents=True, exist_ok=True)
-        (PIDS_DIR / str(claude_pid)).touch()
-        _log(f"recorded claude pid={claude_pid}")
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(SOCK)
+        msg = {"kind": "register_pid", "pid": claude_pid}
+        s.sendall((json.dumps(msg) + "\n").encode())
+        raw = s.recv(128)
+        s.close()
+        reply = json.loads(raw.decode() or "{}")
+        if reply.get("registered_pid") != claude_pid:
+            _log(f"daemon did not confirm pid registration: {reply!r}")
+            return False
+        _log(f"registered claude pid={claude_pid}")
+        return True
     except Exception as e:
-        _log(f"mark_claude_code_alive({claude_pid}) failed: {e}")
+        _log(f"register_claude_pid({claude_pid}) failed: {e}")
+        return False
 
 
 def daemon_alive() -> bool:
@@ -71,7 +117,7 @@ def daemon_alive() -> bool:
         return False
 
 
-def spawn_daemon() -> None:
+def spawn_daemon(claude_pid: int) -> None:
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
     _log(f"CLAUDE_PLUGIN_ROOT={plugin_root!r}")
     if not plugin_root:
@@ -102,7 +148,9 @@ def spawn_daemon() -> None:
 
     cmd = [uv_path, "run", "--quiet", str(script),
            "--device-prefix", device_prefix,
-           "--owner", owner, "-v"]
+           "--owner", owner,
+           "--initial-claude-pid", str(claude_pid),
+           "-v"]
     _log(f"spawning: {' '.join(cmd)}")
 
     try:
@@ -137,13 +185,16 @@ def main() -> int:
         session_id = ""
 
     _log(f"invoked session_id={session_id!r}")
-    mark_claude_code_alive()
+    claude_pid = find_claude_pid()
+    _log(f"found claude pid={claude_pid}")
 
     if daemon_alive():
+        if not register_claude_pid(claude_pid):
+            _log("daemon alive but PID registration failed; restart daemon to apply lifecycle fix")
         _log("daemon already alive, skipping")
         return 0
     try:
-        spawn_daemon()
+        spawn_daemon(claude_pid)
     except Exception as e:
         _log(f"top-level exception: {e}")
     return 0

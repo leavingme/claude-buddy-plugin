@@ -68,10 +68,15 @@ class Session:
 
 
 class Bridge:
-    def __init__(self, device_prefix: str, sock_path: str, owner: str):
+    def __init__(
+        self, device_prefix: str, sock_path: str, owner: str, pids_dir: Path
+    ):
         self.device_prefix = device_prefix
         self.sock_path = sock_path
         self.owner = owner
+        self.pids_dir = pids_dir
+        self.tracked_pids: set[int] = set()
+        self.had_tracked_pid = False
         self.sessions: dict[str, Session] = {}
         self.entries: deque[str] = deque(maxlen=8)  # 全局 transcript tail
         self.tokens_today: int = 0
@@ -91,24 +96,42 @@ class Bridge:
         self.stop_event = asyncio.Event()
 
     # ------------------------------------------------------------------
-    # Session reference counting
-    #   /tmp/claude-buddy-sessions/<sid> 文件的存在 = 活跃 session。
-    #   Claude Code SessionStart hook touch 它；SessionEnd hook 删它。
-    #   daemon 每秒扫，空目录超过 EXIT_GRACE_SEC 就自己优雅退出。
+    # Claude Code process tracking
+    #   spawn_daemon.py finds the owning Claude Code PID and sends it here.
+    #   The daemon owns the in-memory PID set and mirrors it to
+    #   /tmp/claude-buddy-pids/ for diagnostics.
 
-    async def process_sentinel(self, pids_dir: Path, grace_sec: int) -> None:
-        """检查记录的 Claude Code PID 是否还活着，全死了就退出。"""
+    def register_claude_pid(self, pid: int) -> None:
+        """记录一个由 hook 上报的 Claude Code PID。"""
+        self.tracked_pids.add(pid)
+        self.had_tracked_pid = True
+        try:
+            self.pids_dir.mkdir(parents=True, exist_ok=True)
+            (self.pids_dir / str(pid)).touch()
+        except OSError as e:
+            logging.debug("failed to mirror PID file %s: %s", pid, e)
+        logging.debug("registered Claude Code PID: %s", pid)
+
+    async def process_sentinel(self, grace_sec: int) -> None:
+        """检查已注册的 Claude Code PID 是否还活着，全死了就退出。"""
         stale_since: float | None = None
         while not self.stop_event.is_set():
-            try:
-                pids = [int(p.name) for p in pids_dir.iterdir() if p.is_file()]
-            except FileNotFoundError:
-                pids = []
+            # 检查哪些 PID 还活着，死的从 daemon 状态和调试文件中删掉
+            alive: set[int] = set()
+            for pid in tuple(self.tracked_pids):
+                if self._pid_exists(pid):
+                    alive.add(pid)
+                else:
+                    self.tracked_pids.discard(pid)
+                    try:
+                        (self.pids_dir / str(pid)).unlink(missing_ok=True)
+                        logging.debug("cleaned up dead PID file: %s", pid)
+                    except OSError:
+                        pass
 
-            # 检查哪些 PID 还活着
-            alive = [pid for pid in pids if self._pid_exists(pid)]
-
-            if pids and not alive:  # 有记录但全死了
+            if alive:
+                stale_since = None
+            elif self.had_tracked_pid:
                 if stale_since is None:
                     stale_since = time.time()
                 elif time.time() - stale_since >= grace_sec:
@@ -198,6 +221,22 @@ class Bridge:
             try:
                 writer.write(
                     (json.dumps({"ack": True, "ble_connected": ble_connected}) + "\n").encode()
+                )
+                await writer.drain()
+            except Exception:
+                pass
+            writer.close()
+            return
+        elif kind == "register_pid":
+            try:
+                pid = int(payload.get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            if pid > 0:
+                self.register_claude_pid(pid)
+            try:
+                writer.write(
+                    (json.dumps({"ack": True, "registered_pid": pid}) + "\n").encode()
                 )
                 await writer.drain()
             except Exception:
@@ -776,11 +815,22 @@ async def amain(args) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    pids_dir = Path(args.pids_dir)
+    pids_dir.mkdir(parents=True, exist_ok=True)
+    for pid_file in pids_dir.iterdir():
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+
     bridge = Bridge(
         device_prefix=args.device_prefix,
         sock_path=args.sock,
         owner=args.owner,
+        pids_dir=pids_dir,
     )
+    if args.initial_claude_pid > 0:
+        bridge.register_claude_pid(args.initial_claude_pid)
 
     # 信号
     loop = asyncio.get_running_loop()
@@ -791,21 +841,10 @@ async def amain(args) -> int:
     ble_task = asyncio.create_task(bridge.ble_loop())
 
     # PID 检测：所有记录的 Claude Code PID 死了 > grace 秒就退出
-    pids_dir = Path(args.pids_dir)
-    pids_dir.mkdir(parents=True, exist_ok=True)
-    # 启动时清理已死的 PID 文件（避免残留导致 immediately exit）
-    for pid_file in pids_dir.iterdir():
-        try:
-            pid = int(pid_file.name)
-            if not Bridge._pid_exists(pid):
-                pid_file.unlink()
-                logging.debug("cleaned up stale PID file: %s", pid)
-        except (ValueError, OSError):
-            pass
     sentinel_task: asyncio.Task | None = None
     if args.exit_on_idle > 0:
         sentinel_task = asyncio.create_task(
-            bridge.process_sentinel(pids_dir, args.exit_on_idle)
+            bridge.process_sentinel(args.exit_on_idle)
         )
 
     try:
@@ -851,7 +890,13 @@ def main() -> int:
     p.add_argument(
         "--pids-dir",
         default="/tmp/claude-buddy-pids",
-        help="Claude Code PID 记录目录；每文件=一个 Claude Code 进程",
+        help="Claude Code PID 调试镜像目录；由 daemon 管理，每文件=一个已注册进程",
+    )
+    p.add_argument(
+        "--initial-claude-pid",
+        type=int,
+        default=0,
+        help="启动 daemon 的 hook 发现的 Claude Code PID",
     )
     p.add_argument(
         "--exit-on-idle",
